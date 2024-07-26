@@ -154,7 +154,7 @@ export default {
 
       try {
         const execRes = await this.mintNft(msg);
-        if (this.projectId === "Create") {
+        if (this.projectId === "Create" || this.projectId === "") {
           const tokenId = execRes.logs[0].events
             .find((e) => e.type === "wasm")
             .attributes.find((attr) => attr.key === "token_id").value;
