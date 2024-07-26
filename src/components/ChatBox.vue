@@ -2,6 +2,7 @@
 import axios from "axios";
 import ChatBalloon from "./ChatBalloon.vue";
 import { getChatArray, disclaimerText } from "../assets/chat.js";
+// import { ConstantineInfo, ContractInfo } from "../assets/chainInfo_testnet";
 import { ConstantineInfo, ContractInfo } from "../assets/chainInfo";
 import { SigningCosmWasmClient } from "@cosmjs/cosmwasm-stargate";
 import { calculateFee, GasPrice } from "@cosmjs/stargate";
@@ -11,21 +12,18 @@ export default {
   data() {
     return {
       chatArray: getChatArray(),
-      prompt: "",
+
       inputText: "",
+      projectId: "",
+
       typing: false,
+
       keplrAddress: null, // Store Keplr wallet address
       keplrClient: null, // Store Keplr client
       gasPrice: GasPrice.fromString(
         "0" + ConstantineInfo.currencies[0].coinMinimalDenom
       ),
       // gasPrice: GasPrice.fromString("0.05const"), // TODO: premium
-      selected: null,
-      options: [
-        { value: "Create", name: "Create" },
-        { value: "0", name: "0" },
-        { value: "1", name: "1" },
-      ],
     };
   },
   mounted() {
@@ -34,7 +32,7 @@ export default {
   computed: {
     placeholderText() {
       return this.keplrAddress
-        ? "Input your JavaScript code to create project ..."
+        ? "Input code or args ..."
         : "Connect wallet first ...";
     },
     inputDisabling() {
@@ -48,6 +46,10 @@ export default {
     ChatBalloon: ChatBalloon,
   },
   methods: {
+    deleteValue() {
+      this.projectId = "";
+    },
+
     async connectKeplr() {
       if (!window.keplr) {
         throw new Error("Please install keplr extension");
@@ -78,15 +80,6 @@ export default {
       return `${address.slice(0, 11)}...${address.slice(-4)}`;
     },
 
-    async getPrompt(client) {
-      const queryResult = await this.keplrClient.queryContractSmart(
-        ContractInfo.contractAddr,
-        {
-          prompt: {},
-        }
-      );
-      return queryResult ? queryResult : null;
-    },
     async getNftInfo(token_id) {
       const queryResult = await this.keplrClient.queryContractSmart(
         ContractInfo.contractAddr,
@@ -100,36 +93,48 @@ export default {
       let executeFee = calculateFee(300_000, this.gasPrice);
       console.log("executeFee:", executeFee);
 
-      const msg = {
-        mint: {
-          token_id: "0", // has no meaning
-          owner: this.keplrAddress,
-          extension: {
-            description: input,
+      const regex = /^\d+$/;
+      let msg;
+
+      if (this.projectId === "Create" || this.projectId === "") {
+        msg = {
+          mint: {
+            token_id: "0", // has no meaning
+            owner: this.keplrAddress,
+            extension: {
+              code: input,
+            },
           },
-        },
-      };
+        };
+      } else if (regex.test(this.projectId)) {
+        msg = {
+          request: {
+            token_id: this.projectId,
+            input: input,
+          },
+        };
+      } else {
+        return undefined;
+      }
+
       const executeResult = await this.keplrClient.execute(
         this.keplrAddress,
         ContractInfo.contractAddr,
         msg,
         executeFee
       );
-      return executeResult ? executeResult : null;
+      return executeResult ? executeResult : undefined;
     },
 
-    async loadOnMounted() {
-      this.scrollToBottom(true);
-    },
     async send(msg) {
       if (this.keplrAddress === null) return;
       if (msg === "") return;
       this.inputText = "";
-      const tokenId = await this.pushMsg(msg);
+      const { tokenId, taskId } = await this.pushMsg(msg);
       this.scrollToBottom(true);
       await this.typingMsg();
       this.scrollToBottom(true);
-      await this.postMsg(tokenId, msg);
+      await this.postMsg(tokenId, taskId, msg);
       this.scrollToBottom(true);
     },
     async pushMsg(msg) {
@@ -141,59 +146,122 @@ export default {
           example: false,
         },
       });
-      // TODO: error catch
-      const execRes = await this.mintNft(msg);
-      const tokenId = execRes.logs[0].events
-        .find((e) => e.type === "wasm")
-        .attributes.find((attr) => attr.key === "token_id").value;
-      console.log(`mint tx for ${tokenId}: ${execRes.transactionHash}`);
-      return tokenId;
+
+      function isNonNegativeInteger(str) {
+        const parsed = parseInt(str, 10);
+        return !isNaN(parsed) && parsed.toString() === str && parsed >= 0;
+      }
+
+      try {
+        const execRes = await this.mintNft(msg);
+        if (this.projectId === "Create") {
+          const tokenId = execRes.logs[0].events
+            .find((e) => e.type === "wasm")
+            .attributes.find((attr) => attr.key === "token_id").value;
+          return { tokenId: tokenId, taskId: undefined };
+        } else if (isNonNegativeInteger(this.projectId)) {
+          const taskId = execRes.logs[0].events
+            .find((e) => e.type === "wasm")
+            .attributes.find((attr) => attr.key === "task_id").value;
+          console.log(
+            `mint tx for ${this.projectId} ${taskId}: ${execRes.transactionHash}`
+          );
+          return { tokenId: this.projectId, taskId: taskId };
+        } else {
+          return { tokenId: undefined, taskId: undefined };
+        }
+      } catch (error) {
+        return undefined; // TODO: error handling
+      }
     },
-    async typingMsg() {
-      this.typing = true;
-    },
-    async postMsg(tokenId, msg) {
+    async postMsg(tokenId, taskId, msg) {
       let nftInfo;
       let words;
 
-      const fetchNftInfo = (tokenId) => {
-        const maxRetryTime = 60000; // Maximum retry time (60 seconds)
-        const retryDelay = 2000; // Delay between retries (e.g., 2 seconds)
-        const startTime = Date.now();
+      console.log(`tokenId: ${tokenId}\ntaskId: ${taskId}`);
 
-        return new Promise(async (resolve, reject) => {
-          const attemptFetch = async () => {
-            try {
-              nftInfo = await this.getNftInfo(tokenId);
-              if (nftInfo.extension.image !== null) {
-                resolve(nftInfo);
-              } else {
-                const elapsedTime = Date.now() - startTime;
-                if (elapsedTime < maxRetryTime) {
-                  setTimeout(attemptFetch, retryDelay);
+      if (!tokenId && !taskId) {
+        words = "Timeout. Try again later, plz.";
+      } else {
+        const fetchNftInfoTasks = (tokenId) => {
+          const maxRetryTime = 60000; // Maximum retry time (60 seconds)
+          const retryDelay = 2000; // Delay between retries (e.g., 2 seconds)
+          const startTime = Date.now();
+
+          return new Promise(async (resolve, reject) => {
+            const attemptFetch = async () => {
+              try {
+                nftInfo = await this.getNftInfo(tokenId);
+                const tasks = nftInfo.extension.tasks;
+                const task = tasks.find((task) => task.tid === taskId);
+                if (task.output !== null) {
+                  resolve(task);
                 } else {
-                  reject(
-                    new Error(
-                      "Timeout: NFT info image is still null after 60 seconds."
-                    )
-                  );
+                  const elapsedTime = Date.now() - startTime;
+                  if (elapsedTime < maxRetryTime) {
+                    setTimeout(attemptFetch, retryDelay);
+                  } else {
+                    reject(
+                      new Error(
+                        "Timeout: NFT info tasks is still null after 60 seconds."
+                      )
+                    );
+                  }
                 }
+              } catch (error) {
+                console.error(error);
+                reject(error);
               }
-            } catch (error) {
-              console.error(error);
-              reject(error);
-            }
-          };
-          attemptFetch();
-        });
-      };
+            };
+            attemptFetch();
+          });
+        };
+        const fetchNftInfoTitle = (tokenId) => {
+          const maxRetryTime = 60000; // Maximum retry time (60 seconds)
+          const retryDelay = 2000; // Delay between retries (e.g., 2 seconds)
+          const startTime = Date.now();
 
-      try {
-        nftInfo = await fetchNftInfo(tokenId);
-        words = nftInfo.extension.image;
-      } catch (error) {
-        console.error(error);
-        words = "Meow! Timeout. Try again, please.";
+          return new Promise(async (resolve, reject) => {
+            const attemptFetch = async () => {
+              try {
+                nftInfo = await this.getNftInfo(tokenId);
+                if (nftInfo.extension.title !== null) {
+                  resolve(nftInfo);
+                } else {
+                  const elapsedTime = Date.now() - startTime;
+                  if (elapsedTime < maxRetryTime) {
+                    setTimeout(attemptFetch, retryDelay);
+                  } else {
+                    reject(
+                      new Error(
+                        "Timeout: NFT info title is still null after 60 seconds."
+                      )
+                    );
+                  }
+                }
+              } catch (error) {
+                console.error(error);
+                reject(error);
+              }
+            };
+            attemptFetch();
+          });
+        };
+
+        try {
+          if (taskId) {
+            const task = await fetchNftInfoTasks(tokenId);
+            words = task.output;
+          } else {
+            nftInfo = await fetchNftInfoTitle(tokenId);
+            const title = nftInfo.extension.title;
+            const description = nftInfo.extension.description;
+            words = `🪙 Token: ${tokenId}\n⚙️ Title: ${title}\n💬 Description: ${description}`;
+          }
+        } catch (error) {
+          console.error(error);
+          words = "Timeout. Try again later, plz.";
+        }
       }
 
       this.typing = false;
@@ -207,6 +275,10 @@ export default {
       });
       await this.typeWriter(index, words);
     },
+
+    async typingMsg() {
+      this.typing = true;
+    },
     async typeWriter(index, words) {
       this.chatArray[index - 1].data.content = "";
       for (let i = 0; i < words.length; i++) {
@@ -218,6 +290,10 @@ export default {
         });
         this.scrollToBottom(false);
       }
+    },
+
+    async loadOnMounted() {
+      this.scrollToBottom(true);
     },
     scrollToBottom(smooth) {
       var el = this.$el.querySelector("#chatballoons-container");
@@ -265,7 +341,7 @@ export default {
     <div>
       <div id="input-container">
         <div class="project-select">
-          <select>
+          <!-- <select class="custom-select">
             <option
               v-for="(item, index) in options"
               :key="index"
@@ -273,7 +349,16 @@ export default {
             >
               {{ item.name }}
             </option>
-          </select>
+          </select> -->
+          <div class="custom-select">
+            <input
+              v-model="projectId"
+              type="text"
+              placeholder="Create"
+              :disabled="inputDisabling"
+              @click="deleteValue"
+            />
+          </div>
         </div>
 
         <div class="padded-input">
@@ -355,10 +440,34 @@ export default {
 
 .project-select {
   position: absolute;
-  top: 30px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
+
+.custom-select {
+  width: 70px;
+  height: 41px;
+
+  border: 1px solid #00000000;
+  background-color: #999999;
+  border-radius: 15px 0px 0px 15px;
+  color: #000000ff;
+
+  padding: 0px 0px 0px 5px;
+
+  text-align: center;
+  font-size: 12px;
+}
+.custom-select input::placeholder {
+  color: #00000099;
+}
+.custom-select input {
+  color: #00000099;
+}
+
 .padded-input {
-  padding: 0px 20px 0px 80px;
+  padding: 0px 20px 0px 90px;
   border: 1px solid #ffffff99;
   border-radius: 15px;
   color: #ffffff99;
@@ -384,7 +493,6 @@ input {
   caret-color: #ffffff99;
   color: #ffffff99;
 }
-
 input::placeholder {
   color: #ffffff99;
 }

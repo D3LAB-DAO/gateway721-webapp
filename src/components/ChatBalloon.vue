@@ -1,5 +1,6 @@
 <script>
 import { thinkingMsg } from "../assets/chat.js";
+// import { ContractInfo } from "../assets/chainInfo_testnet";
 import { ContractInfo } from "../assets/chainInfo";
 
 export default {

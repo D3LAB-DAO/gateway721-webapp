@@ -12,7 +12,7 @@ const disclaimerText = `Gateway721 is an Blockchain + AI project developed and o
 By using the Gateway721 service, users are deemed to fully understand and agree to all the contents of this disclaimer. If you do not agree to these terms, do not use the Gateway721 service.`;
 
 /* Global Variables */
-let thinkingMsg = ref("Purr...");
+let thinkingMsg = ref("Thinking");
 
 /* getter functions */
 function getChatArray() {
