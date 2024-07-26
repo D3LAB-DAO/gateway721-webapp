@@ -1,0 +1,27 @@
+{
+  "name": "gateway721-webapp",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
+  },
+  "dependencies": {
+    "@cosmjs/cosmwasm-stargate": "^0.32.4",
+    "@cosmjs/proto-signing": "^0.32.4",
+    "@cosmjs/stargate": "^0.32.4",
+    "@keplr-wallet/types": "^0.12.111",
+    "axios": "^1.4.0",
+    "vue": "^3.3.4",
+    "vue-select": "^4.0.0-beta.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.2.3",
+    "gh-pages": "^6.1.1",
+    "vite": "^4.3.9"
+  },
+  "homepage": "https://github.com/D3LAB-DAO/gateway721-webapp/"
+}
