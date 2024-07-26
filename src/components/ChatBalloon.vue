@@ -38,7 +38,7 @@ export default {
         <img
           v-if="type === 'ai' || type === 'bubble'"
           class="profile"
-          src="/profile.webp"
+          src="/profile.png"
         />
         <span>{{ msg }}</span>
       </div>
